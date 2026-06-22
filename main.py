@@ -802,3 +802,167 @@ def pdf_ciudadano(dni: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    
+
+#endpoint auditoria 
+class ConsultaAuditoria(BaseModel):
+    nombre_usuario: str
+    rol: str
+    tipo_consulta: str
+    valor_buscado: str
+    encontrado: bool
+
+class FiltrosAuditoria(BaseModel):
+    usuario: str = ""
+    tipo: str = "todos"
+    limite: int = 100
+
+@app.post("/auditoria/registrar")
+def registrar_auditoria(datos: ConsultaAuditoria):
+    try:
+        supabase.table("auditoria_consultas").insert({
+            "nombre_usuario": datos.nombre_usuario,
+            "rol":            datos.rol,
+            "tipo_consulta":  datos.tipo_consulta,
+            "valor_buscado":  datos.valor_buscado,
+            "encontrado":     datos.encontrado,
+            "direccion_ip":   "0.0.0.0",
+        }).execute()
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Endpoint: listar registros de auditoría (solo admin) ──
+@app.post("/auditoria/listar")
+def listar_auditoria(filtros: FiltrosAuditoria):
+    try:
+        query = supabase.table("auditoria_consultas") \
+            .select("*") \
+            .order("fecha_hora", desc=True) \
+            .limit(filtros.limite)
+
+        if filtros.usuario:
+            query = query.eq("nombre_usuario", filtros.usuario)
+        if filtros.tipo != "todos":
+            query = query.eq("tipo_consulta", filtros.tipo)
+
+        resp = query.execute()
+        data = resp.data or []
+
+        total = len(data)
+        encontrados = sum(1 for r in data if r.get("encontrado"))
+
+        return {
+            "ok": True,
+            "total": total,
+            "encontrados": encontrados,
+            "no_encontrados": total - encontrados,
+            "registros": data,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+# ── Modelos ──
+class NuevoUsuario(BaseModel):
+    nombre_usuario: str
+    password: str
+    nombre_completo: str = ""
+    rol: str = "consultor"
+
+class CambioRol(BaseModel):
+    id_usuario: int
+    nuevo_rol: str
+
+
+# ── Endpoint: listar usuarios (solo admin) ──
+@app.get("/usuarios")
+def listar_usuarios():
+    try:
+        resp = supabase.table("usuarios") \
+            .select("id_usuario, nombre_usuario, nombre_completo, rol, activo, ultimo_acceso") \
+            .order("id_usuario") \
+            .execute()
+        return {"ok": True, "usuarios": resp.data or []}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Endpoint: crear usuario nuevo ──
+@app.post("/usuarios/crear")
+def crear_usuario(datos: NuevoUsuario):
+    try:
+        supabase.table("usuarios").insert({
+            "nombre_usuario":  datos.nombre_usuario.strip(),
+            "password":        datos.password,
+            "nombre_completo": datos.nombre_completo.strip() or None,
+            "rol":             datos.rol,
+            "activo":          True,
+        }).execute()
+        return {"ok": True, "mensaje": f"Usuario '{datos.nombre_usuario}' creado correctamente"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Endpoint: dar de baja usuario ──
+@app.patch("/usuarios/{id_usuario}/baja")
+def dar_baja_usuario(id_usuario: int):
+    try:
+        # Verificar que no sea el último admin activo
+        admins = supabase.table("usuarios") \
+            .select("id_usuario") \
+            .eq("rol", "admin") \
+            .eq("activo", True) \
+            .execute()
+
+        usuario = supabase.table("usuarios") \
+            .select("rol") \
+            .eq("id_usuario", id_usuario) \
+            .execute()
+
+        if usuario.data and usuario.data[0]["rol"] == "admin" and len(admins.data) <= 1:
+            raise HTTPException(
+                status_code=400,
+                detail="No se puede dar de baja al último admin activo"
+            )
+
+        supabase.table("usuarios").update(
+            {"activo": False}
+        ).eq("id_usuario", id_usuario).execute()
+
+        return {"ok": True, "mensaje": "Usuario dado de baja correctamente"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Endpoint: reactivar usuario ──
+@app.patch("/usuarios/{id_usuario}/reactivar")
+def reactivar_usuario(id_usuario: int):
+    try:
+        supabase.table("usuarios").update(
+            {"activo": True}
+        ).eq("id_usuario", id_usuario).execute()
+        return {"ok": True, "mensaje": "Usuario reactivado correctamente"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Endpoint: cambiar rol ──
+@app.patch("/usuarios/rol")
+def cambiar_rol(datos: CambioRol):
+    try:
+        if datos.nuevo_rol not in ("admin", "consultor"):
+            raise HTTPException(
+                status_code=400,
+                detail="Rol inválido. Debe ser 'admin' o 'consultor'"
+            )
+        supabase.table("usuarios").update(
+            {"rol": datos.nuevo_rol}
+        ).eq("id_usuario", datos.id_usuario).execute()
+        return {"ok": True, "mensaje": f"Rol actualizado a '{datos.nuevo_rol}'"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
