@@ -1,6 +1,6 @@
 # SPF API
 
-Backend del Sistema de Consultas del Servicio Penitenciario Federal (SPF), desarrollado como proyecto personal para gestión interna de internos, ciudadanos vinculados y alertas de inteligencia financiera.
+Backend del Sistema de Consultas del Servicio Penitenciario Federal (SPF), desarrollado como proyecto personal para gestión interna de internos, ciudadanos vinculados y gestión de alertas.
 
 > El frontend del sistema (Streamlit) consume esta API. Este repositorio contiene únicamente el backend.
 
